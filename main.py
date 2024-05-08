@@ -17,6 +17,8 @@ from pygame import mixer, error
 from pywinstyles import set_opacity, apply_style
 from whisper import _download, _MODELS
 from whisper.utils import get_writer
+from moviepy.editor import *
+from moviepy.video.tools.subtitles import SubtitlesClip
 
 from util import (center_window, get_gpu_info, save_default, load_settings, save_settings, Transcriber,
                   CTkScrollableDropdown)
@@ -784,12 +786,12 @@ class ExportWindow(ctk.CTkFrame):
 
 class APP(ctk.CTk):
     WIDTH = 1300
-    HEIGHT = 900
+    HEIGHT = 600
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         center_window(self, self.WIDTH, self.HEIGHT)
-        self.resizable(False, False)
+        self.resizable(True, True)
         self.title("Winsper")
         self.iconbitmap(LOGO)
 
@@ -797,7 +799,6 @@ class APP(ctk.CTk):
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
-
         self.copy_btn = None
         self.export_btn = None
         self.audio_title = None
@@ -819,7 +820,7 @@ class APP(ctk.CTk):
         self.sidebar_widgets()
 
     def sidebar_widgets(self):
-        open_btn = ctk.CTkButton(self.sidebar_frame, text="New File", width=200, height=35, image=ICONS["new"],
+        open_btn = ctk.CTkButton(self.sidebar_frame, text="New File", width=200, height=35,fg_color="#369EFF", image=ICONS["new"],
                                  compound="left", anchor="w", font=("", 15), command=self.select_file)
         open_btn.grid(row=0, column=0, padx=(20, 10), pady=20, sticky="ew")
 
@@ -859,7 +860,7 @@ class APP(ctk.CTk):
 
     def select_file(self):
         file_path = filedialog.askopenfilename(parent=self, defaultextension=".mp3",
-                                               filetypes=[("Audio files", "*.mp3 *.wav")])
+                                               filetypes=[("Audio files", "*.mp3 *.wav *.mp4")])
         if not file_path:
             return
 
@@ -867,6 +868,7 @@ class APP(ctk.CTk):
         base_name, extension = os.path.splitext(get_base_name)
         duration = self.get_audio_duration(file_path)
         title = self.truncate_text(base_name, 35)
+        # print(duration, title, extension, file_path)
 
         if not duration:
             ctkcomponents.CTkNotification(master=self, state="error",
@@ -917,7 +919,44 @@ class APP(ctk.CTk):
         btn2.pack(expand=True, fill="x", padx=10, pady=(0, 1))
 
         self.open_transcriber(file_path, duration)
+    def test_fn(self, path):
+        print("hello world from embed")
+        srtfile = self.test_select_file();
+        print(path)
+        video = VideoFileClip(path)
+        generator = lambda txt: TextClip(txt, color='white', fontsize=20, font='Century',
+    stroke_width=1, method='caption', size=[video.size[0]/1.2,None],bg_color='black')
+        print(video.size[0], video.size[1])
+        subs = SubtitlesClip(srtfile, generator)
+        subtitles = SubtitlesClip(subs, generator)
 
+        
+        loader = ctkcomponents.CTkLoader(self, width=40,height=40)
+        # self.on_close()
+        def start_transcription():
+            try:
+                result = CompositeVideoClip([video, subtitles.set_position(("center", 0.85), relative=True)])
+
+                result.write_videofile("video_with_subtitle.mp4")
+            except Exception as e:
+                print(e)
+            finally:
+                if loader.winfo_exists():
+                    loader.destroy()
+                    #popup to show location of saved video
+
+        thread = threading.Thread(target=start_transcription, daemon=True)
+        thread.start()
+
+    def on_close(self):
+        self.destroy()
+    def test_select_file(self):
+        print("hello world from select file")
+        file_path = filedialog.askopenfilename(parent=self, defaultextension=".mp3",
+                                               filetypes=[("Srt File", "*.srt")])
+        if not file_path:
+            return
+        return file_path
     def toggle_pages(self, page_name):
         data = self.pages[page_name]
 
@@ -932,10 +971,10 @@ class APP(ctk.CTk):
 
         self.result_frame = ctk.CTkScrollableFrame(self.main_frame, corner_radius=2, scrollbar_button_color="#393B40",
                                                    scrollbar_button_hover_color="#43454A", fg_color="transparent")
-        self.result_frame.grid(row=1, column=0, padx=0, pady=5, sticky="nsew", columnspan=3)
+        self.result_frame.grid(row=1, column=0, padx=0, pady=5, sticky="nsew", columnspan=6)
 
-        audio_player = CTkAudioPlayer(self.main_frame, data["path"])
-        audio_player.grid(row=2, column=0, padx=20, pady=(5, 10), sticky="w")
+        # audio_player = CTkAudioPlayer(self.main_frame, data["path"])
+        # audio_player.grid(row=2, column=0, padx=20, pady=(5, 10), sticky="w")
 
         self.copy_btn = ctk.CTkButton(self.main_frame, text="Plain Text", width=150, height=35, image=ICONS["text"],
                                       compound="left", font=("", 14), command=lambda: self.copy_text(data["text"]))
@@ -945,6 +984,11 @@ class APP(ctk.CTk):
                                         compound="left",
                                         font=("", 14), command=lambda: self.open_export(data["path"], data["text"]))
         self.export_btn.grid(row=2, column=2, padx=(3, 10), pady=(5, 10), sticky="sw")
+
+        self.export_btn = ctk.CTkButton(self.main_frame, text="Embed Subtitle", height=35, image=ICONS["cc"],
+                                        compound="left",
+                                        font=("", 14), command=lambda: self.test_fn(data["path"]))
+        self.export_btn.grid(row=2, column=3, padx=(3, 10), pady=(5, 10), sticky="sw")
 
         self.copy_btn.configure(state="disabled")
         self.export_btn.configure(state="disabled")
@@ -997,8 +1041,8 @@ class APP(ctk.CTk):
     @staticmethod
     def get_audio_duration(file_path):
         try:
-            mixer.init()
-            mixer.music.load(file_path)
+            # mixer.init()
+            # mixer.music.load(file_path)
             audio = File(file_path)
             duration_s = int(audio.info.length)
             hours, remainder = divmod(duration_s, 3600)
@@ -1007,8 +1051,8 @@ class APP(ctk.CTk):
             return f"{hours:02}:{minutes:02}:{seconds:02}"
 
         except (error, MutagenError) as e:
+            print(e)
             return None
-
     @staticmethod
     def truncate_text(text, max_length):
         if len(text) > max_length:
